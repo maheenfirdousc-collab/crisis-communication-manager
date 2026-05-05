@@ -1,25 +1,27 @@
+import requests
+import os
+import json
 import time
-from utils.metrics import response_times
-def call_groq(prompt):
-    start = time.time()
-
-    # existing API call
-    response = ...
-
-    end = time.time()
-    response_times.append((end - start) * 1000)
-
-    return response
-
 import redis
 import hashlib
+from dotenv import load_dotenv
+from utils.metrics import response_times
 
+load_dotenv()
+
+# 🔑 API KEY
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# 🔥 REDIS SETUP
 r = redis.Redis(host='localhost', port=6379, db=0)
 
 def call_groq(prompt):
+    # 🔐 CREATE CACHE KEY
     key = hashlib.sha256(prompt.encode()).hexdigest()
 
-    # 🔥 CHECK CACHE
+    # =========================
+    # 🔹 CACHE CHECK
+    # =========================
     cached = r.get(key)
     if cached:
         print("CACHE HIT")
@@ -27,25 +29,6 @@ def call_groq(prompt):
 
     print("CACHE MISS")
 
-    # API call
-    response = ...
-
-    # STORE CACHE (15 min = 900 sec)
-    r.setex(key, 900, response)
-
-    return response    
-
-import requests
-import os
-import json
-import time
-from dotenv import load_dotenv
-
-load_dotenv()
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-def call_groq(prompt):
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     headers = {
@@ -61,10 +44,24 @@ def call_groq(prompt):
         "temperature": 0.3
     }
 
-    # 🔁 RETRY LOGIC (3 times)
+    # =========================
+    # 🔁 RETRY LOGIC
+    # =========================
     for attempt in range(3):
         try:
-            response = requests.post(url, headers=headers, json=data, timeout=10)
+            start = time.time()
+
+            response = requests.post(
+                url,
+                headers=headers,
+                json=data,
+                timeout=2   # ⚡ performance constraint
+            )
+
+            end = time.time()
+
+            # ⏱ TRACK RESPONSE TIME
+            response_times.append((end - start) * 1000)
 
             if response.status_code != 200:
                 raise Exception("Bad response")
@@ -76,17 +73,16 @@ def call_groq(prompt):
             if output_text.startswith("```"):
                 output_text = output_text.strip("```json").strip("```")
 
-            return json.loads(output_text)
+            # 💾 STORE IN CACHE (15 min)
+            r.setex(key, 900, output_text)
+
+            return output_text
 
         except Exception as e:
             print(f"Attempt {attempt+1} failed:", e)
-            time.sleep(2)
+            time.sleep(1)
 
-    # 🚨 FALLBACK (IMPORTANT FOR PROJECT)
-    return {
-        "title": "AI unavailable",
-        "summary": "Unable to process request at the moment",
-        "severity": "MEDIUM",
-        "key_points": ["Service temporarily down", "Retry later", "Fallback response"],
-        "is_fallback": True
-    }
+    # =========================
+    # 🚨 FALLBACK (DAY 9)
+    # =========================
+    return None
