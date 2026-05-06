@@ -1,1 +1,0 @@
-# Crisis Communication Manager
